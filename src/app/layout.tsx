@@ -33,7 +33,7 @@ export const metadata: Metadata = {
     type: "website",
     images: [
       {
-        url: "/og-image.png",
+        url: "/og-image-v2.png",
         width: 1200,
         height: 630,
         alt: "Branding Curve",
@@ -44,7 +44,7 @@ export const metadata: Metadata = {
     card: "summary_large_image",
     title: "Branding Curve",
     description: "Agency daily reporting",
-    images: ["/og-image.png"],
+    images: ["/og-image-v2.png"],
   },
   appleWebApp: {
     capable: true,

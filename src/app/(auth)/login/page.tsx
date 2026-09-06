@@ -12,7 +12,7 @@ export default async function LoginPage() {
       <div className="min-h-dvh bg-neutral-200/70">
         <div className="mx-auto flex min-h-dvh max-w-[430px] flex-col justify-center bg-background px-6 py-10">
           <div className="mb-10 text-center">
-            <div className="mx-auto mb-6 flex size-14 items-center justify-center rounded-2xl bg-foreground text-lg font-semibold text-background">
+            <div className="mx-auto mb-6 flex size-14 items-center justify-center rounded-2xl bg-primary text-lg font-semibold text-primary-foreground">
               BC
             </div>
             <p className="text-sm font-medium tracking-wide text-muted-foreground">

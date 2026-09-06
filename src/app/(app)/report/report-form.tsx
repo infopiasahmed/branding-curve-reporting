@@ -145,7 +145,7 @@ export default function ReportForm() {
                     )
                   }
                   className={`rounded-full px-3 py-2 text-sm ${
-                    selected ? "bg-foreground text-background" : "bg-white text-foreground ring-1 ring-border"
+                    selected ? "bg-primary text-primary-foreground" : "bg-white text-foreground ring-1 ring-border"
                   }`}
                 >
                   {TAG_LABELS[tag]}

@@ -101,7 +101,7 @@ function NewMeetingForm() {
                 type="button"
                 onClick={() => setType(item)}
                 className={`h-12 rounded-xl capitalize ${
-                  type === item ? "bg-foreground text-background" : "bg-white ring-1 ring-border"
+                  type === item ? "bg-primary text-primary-foreground" : "bg-white ring-1 ring-border"
                 }`}
               >
                 {item}

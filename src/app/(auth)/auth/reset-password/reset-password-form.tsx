@@ -307,7 +307,7 @@ export function ResetPasswordForm() {
         <p className="text-center text-sm">
           <Link
             href="/login"
-            className="text-muted-foreground underline-offset-4 hover:text-foreground hover:underline"
+            className="text-muted-foreground underline-offset-4 hover:text-primary hover:underline"
           >
             Back to login
           </Link>

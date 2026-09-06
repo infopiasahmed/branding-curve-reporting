@@ -85,7 +85,7 @@ export function LoginForm() {
         <p className="-mt-2 text-right">
           <Link
             href="/auth/forgot-password"
-            className="text-sm text-muted-foreground underline-offset-4 hover:text-foreground hover:underline"
+            className="text-sm text-muted-foreground underline-offset-4 hover:text-primary hover:underline"
           >
             Forgot password?
           </Link>

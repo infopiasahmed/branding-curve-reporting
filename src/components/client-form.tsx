@@ -75,7 +75,7 @@ export function ClientForm({
                 type="button"
                 onClick={() => setStatus(item)}
                 className={`h-12 rounded-xl capitalize ${
-                  status === item ? "bg-foreground text-background" : "bg-white ring-1 ring-border"
+                  status === item ? "bg-primary text-primary-foreground" : "bg-white ring-1 ring-border"
                 }`}
               >
                 {item}

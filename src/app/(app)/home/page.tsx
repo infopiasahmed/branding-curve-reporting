@@ -1,6 +1,7 @@
 "use client"
 
 import Link from "next/link"
+import { useEffect, useState } from "react"
 import { useRouter } from "next/navigation"
 import { ActivityRow } from "@/components/activity-row"
 import { EmptyState } from "@/components/empty-state"
@@ -21,8 +22,53 @@ import {
 } from "@/lib/data/selectors"
 import { displayName } from "@/types/domain"
 
+function localGreeting(date = new Date()) {
+  const hour = date.getHours()
+  if (hour >= 5 && hour < 12) return "Good morning"
+  if (hour >= 12 && hour < 17) return "Good afternoon"
+  if (hour >= 17 && hour < 21) return "Good evening"
+  return "Good night"
+}
+
+function msUntilNextGreeting(now: Date) {
+  const hour = now.getHours()
+  const next = new Date(now)
+  const nextHour = hour < 5 ? 5 : hour < 12 ? 12 : hour < 17 ? 17 : hour < 21 ? 21 : 5
+  if (nextHour === 5 && hour >= 21) next.setDate(next.getDate() + 1)
+  next.setHours(nextHour, 0, 0, 0)
+  return next.getTime() - now.getTime() + 50
+}
+
+function useLocalGreeting() {
+  const [text, setText] = useState<string | null>(null)
+
+  useEffect(() => {
+    let timeoutId = 0
+
+    const apply = () => {
+      const now = new Date()
+      setText(localGreeting(now))
+      window.clearTimeout(timeoutId)
+      timeoutId = window.setTimeout(apply, Math.max(msUntilNextGreeting(now), 250))
+    }
+
+    apply()
+    const onVisibility = () => {
+      if (document.visibilityState === "visible") apply()
+    }
+    document.addEventListener("visibilitychange", onVisibility)
+    return () => {
+      window.clearTimeout(timeoutId)
+      document.removeEventListener("visibilitychange", onVisibility)
+    }
+  }, [])
+
+  return text
+}
+
 export default function HomePage() {
   const { user, state } = useAgency()
+  const greeting = useLocalGreeting()
   const router = useRouter()
   if (!user) return <ScreenSkeleton />
 
@@ -50,7 +96,7 @@ export default function HomePage() {
         <div>
           <p className="text-sm text-muted-foreground">{formatLongDate()}</p>
           <h1 className="mt-1 text-[28px] font-semibold leading-tight tracking-tight">
-            Good morning, {user.firstName}
+            {greeting ? `${greeting}, ${user.firstName}` : user.firstName}
           </h1>
         </div>
         <Link href="/profile">

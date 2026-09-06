@@ -33,7 +33,7 @@ export function BottomNav() {
                   href={item.href}
                   className="-mt-6 flex flex-col items-center gap-1"
                 >
-                  <span className="flex size-14 items-center justify-center rounded-full bg-foreground text-background shadow-[0_8px_20px_rgba(20,16,12,0.18)]">
+                  <span className="flex size-14 items-center justify-center rounded-full bg-primary text-primary-foreground shadow-[0_8px_20px_rgba(72,10,122,0.28)]">
                     <Icon className="size-6" />
                   </span>
                   <span className="text-[11px] font-medium text-foreground">
@@ -50,7 +50,7 @@ export function BottomNav() {
                 suppressHydrationWarning
                 className={cn(
                   "flex min-h-12 flex-col items-center justify-center gap-0.5 text-[11px]",
-                  active ? "font-medium text-foreground" : "text-muted-foreground"
+                  active ? "font-medium text-primary" : "text-muted-foreground"
                 )}
               >
                 <Icon className="size-5" />
