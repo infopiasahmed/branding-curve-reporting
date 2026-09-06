@@ -113,7 +113,9 @@ export function mapMeeting(
     meetingTime: String(row.meeting_time).slice(0, 5),
     meetingType: row.meeting_type,
     notes: row.notes ?? undefined,
-    participantIds: (row.meeting_participants ?? []).map((item) => item.user_id),
+    participantIds: Array.from(
+      new Set([row.created_by, ...(row.meeting_participants ?? []).map((item) => item.user_id)])
+    ),
     actionItems,
     createdAt: row.created_at,
     updatedAt: row.updated_at,
