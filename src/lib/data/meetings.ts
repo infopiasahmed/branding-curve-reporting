@@ -8,6 +8,11 @@ const MEETING_SELECT =
 const INVALID_PARTICIPANTS =
   "One or more selected participants do not have access to this client."
 
+const SESSION_EXPIRED = "Not signed in. Your session may have expired. Sign in again and retry."
+
+const MEETING_INSERT_RLS =
+  "You do not have permission to do that. The current signed-in user was used as the meeting creator, and related rows were not loaded as part of the insert. This remaining failure is a database permission check."
+
 export async function fetchMeetings(client: SupabaseClient) {
   const { data, error } = await client
     .from("meetings")
@@ -15,6 +20,23 @@ export async function fetchMeetings(client: SupabaseClient) {
     .order("meeting_date", { ascending: false })
   if (error) throw new Error(explainSupabaseError(error))
   return (data ?? []).map((row) => mapMeeting(row as never))
+}
+
+async function fetchMeetingById(client: SupabaseClient, meetingId: string) {
+  const { data, error } = await client
+    .from("meetings")
+    .select(MEETING_SELECT)
+    .eq("id", meetingId)
+    .single()
+  if (error) throw new Error(explainSupabaseError(error))
+  return mapMeeting(data as never)
+}
+
+function explainMeetingInsertError(error: { message: string; code?: string }) {
+  if (error.code === "42501" || error.message.toLowerCase().includes("row-level security")) {
+    return MEETING_INSERT_RLS
+  }
+  return explainSupabaseError(error)
 }
 
 function extraParticipantIds(creatorId: string, participantIds: string[]) {
@@ -102,7 +124,6 @@ async function cleanupCreatedMeeting(
 
 export async function saveMeetingRecord(
   client: SupabaseClient,
-  createdBy: string,
   input: {
     id?: string
     clientId: string
@@ -116,16 +137,22 @@ export async function saveMeetingRecord(
   }
 ): Promise<Meeting> {
   const isNew = !input.id
-  let creatorId = createdBy
+  let creatorId: string
 
-  if (input.id) {
+  if (isNew) {
+    const { data: authData, error: authError } = await client.auth.getUser()
+    if (authError || !authData.user) {
+      throw new Error(SESSION_EXPIRED)
+    }
+    creatorId = authData.user.id
+  } else {
     const { data: existing, error: existingError } = await client
       .from("meetings")
       .select("created_by")
       .eq("id", input.id)
       .single()
     if (existingError) throw new Error(explainSupabaseError(existingError))
-    creatorId = (existing.created_by as string) || createdBy
+    creatorId = existing.created_by as string
   }
 
   const extraIds = await eligibleExtraParticipants(
@@ -135,30 +162,37 @@ export async function saveMeetingRecord(
     input.participantIds
   )
 
-  const payload = {
-    client_id: input.clientId,
-    created_by: createdBy,
-    title: input.title,
-    meeting_date: input.meetingDate,
-    meeting_time: input.meetingTime,
-    meeting_type: input.meetingType,
-    notes: input.notes ?? null,
+  let meetingId: string
+
+  if (isNew) {
+    const payload = {
+      client_id: input.clientId,
+      created_by: creatorId,
+      title: input.title,
+      meeting_date: input.meetingDate,
+      meeting_time: input.meetingTime,
+      meeting_type: input.meetingType,
+      notes: input.notes ?? null,
+    }
+
+    const { data, error } = await client.from("meetings").insert(payload).select("*").single()
+    if (error) throw new Error(explainMeetingInsertError(error))
+    meetingId = data.id as string
+  } else {
+    const { error } = await client
+      .from("meetings")
+      .update({
+        title: input.title,
+        meeting_date: input.meetingDate,
+        meeting_time: input.meetingTime,
+        meeting_type: input.meetingType,
+        notes: input.notes ?? null,
+      })
+      .eq("id", input.id)
+    if (error) throw new Error(explainSupabaseError(error))
+    meetingId = input.id as string
   }
 
-  const query = input.id
-    ? client.from("meetings").update({
-        title: payload.title,
-        meeting_date: payload.meeting_date,
-        meeting_time: payload.meeting_time,
-        meeting_type: payload.meeting_type,
-        notes: payload.notes,
-      }).eq("id", input.id)
-    : client.from("meetings").insert(payload)
-
-  const { data, error } = await query.select(MEETING_SELECT).single()
-  if (error) throw new Error(explainSupabaseError(error))
-  const meetingId = data.id as string
-  creatorId = (data.created_by as string) || creatorId
   const extrasForInsert = extraParticipantIds(creatorId, extraIds)
 
   try {
@@ -174,18 +208,12 @@ export async function saveMeetingRecord(
     }
   } catch (participantError) {
     if (isNew) {
-      await cleanupCreatedMeeting(client, meetingId, createdBy)
+      await cleanupCreatedMeeting(client, meetingId, creatorId)
     }
     throw participantError
   }
 
-  const { data: fresh, error: reloadError } = await client
-    .from("meetings")
-    .select(MEETING_SELECT)
-    .eq("id", meetingId)
-    .single()
-  if (reloadError) throw new Error(explainSupabaseError(reloadError))
-  return mapMeeting(fresh as never)
+  return fetchMeetingById(client, meetingId)
 }
 
 export async function toggleActionItemRecord(

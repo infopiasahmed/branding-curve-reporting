@@ -250,7 +250,7 @@ export function AgencyProvider({
         }
         const supabase = createSupabaseBrowserClient()
         if (!supabase) throw new Error("Supabase is not configured")
-        const saved = await saveMeetingRecord(supabase, user.id, input)
+        const saved = await saveMeetingRecord(supabase, input)
         await refreshRemote()
         return saved
       },
