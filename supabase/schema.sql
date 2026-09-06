@@ -724,7 +724,14 @@ create policy "report_tags_write" on public.report_tags
 drop policy if exists "meetings_select" on public.meetings;
 create policy "meetings_select" on public.meetings
   for select to authenticated
-  using (public.can_read_meeting(id));
+  using (
+    public.is_active_user()
+    and (
+      public.is_assigned_to_client(client_id)
+      or created_by = auth.uid()
+      or public.is_meeting_participant(id)
+    )
+  );
 
 drop policy if exists "meetings_insert" on public.meetings;
 create policy "meetings_insert" on public.meetings
