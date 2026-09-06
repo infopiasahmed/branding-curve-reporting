@@ -1,7 +1,7 @@
 "use server"
 
 import { getInviteRedirectTo } from "@/lib/app-origin"
-import { createSupabaseServerClient } from "@/lib/supabase/server"
+import { requireActiveAdmin } from "@/lib/auth/require-active-admin"
 import { createSupabaseServiceClient } from "@/lib/supabase/service"
 
 const EMAIL_PATTERN = /^[^\s@]+@[^\s@]+\.[^\s@]+$/
@@ -23,33 +23,8 @@ export async function inviteMarketerAction(input: {
     return { ok: false as const, message: "Enter a valid email address." }
   }
 
-  const supabase = await createSupabaseServerClient()
-  if (!supabase) {
-    return { ok: false as const, message: "The database is not connected." }
-  }
-
-  const {
-    data: { user },
-  } = await supabase.auth.getUser()
-  if (!user) {
-    return { ok: false as const, message: UNAUTHORIZED }
-  }
-
-  const { data: profile, error: profileError } = await supabase
-    .from("profiles")
-    .select("id, role, is_active")
-    .eq("id", user.id)
-    .maybeSingle()
-
-  if (
-    profileError ||
-    !profile ||
-    profile.id !== user.id ||
-    profile.role !== "admin" ||
-    profile.is_active !== true
-  ) {
-    return { ok: false as const, message: UNAUTHORIZED }
-  }
+  const authz = await requireActiveAdmin(UNAUTHORIZED)
+  if (!authz.ok) return authz
 
   const admin = createSupabaseServiceClient()
   if (!admin) {

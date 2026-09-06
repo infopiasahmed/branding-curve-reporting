@@ -1,24 +1,56 @@
 "use client"
 
-import { FormEvent, useState } from "react"
-import Link from "next/link"
+import { FormEvent, useCallback, useEffect, useState } from "react"
 import { toast } from "sonner"
+import { loadTeamRosterAction, type TeamRosterMember } from "@/app/actions/team-admin"
 import { EmptyState } from "@/components/empty-state"
 import { PageHeader } from "@/components/page-header"
 import { ScreenSkeleton } from "@/components/screen-skeleton"
 import { Button } from "@/components/ui/button"
 import { Input } from "@/components/ui/input"
-import { UserAvatar } from "@/components/user-avatar"
 import { useAgency } from "@/components/providers/agency-provider"
+import { TeamMarketerCard } from "@/app/(app)/team/team-marketer-card"
 import { assignmentsForUser, reportingProgress } from "@/lib/data/selectors"
-import { displayName } from "@/types/domain"
 
 export default function TeamPage() {
-  const { user, state, inviteMarketer } = useAgency()
+  const { user, state, inviteMarketer, refresh, demoMode } = useAgency()
   const [open, setOpen] = useState(false)
   const [firstName, setFirstName] = useState("")
   const [lastName, setLastName] = useState("")
   const [email, setEmail] = useState("")
+  const [roster, setRoster] = useState<TeamRosterMember[]>([])
+
+  const reloadRoster = useCallback(async () => {
+    if (demoMode) {
+      setRoster([])
+      return
+    }
+    const result = await loadTeamRosterAction()
+    if (!result.ok) {
+      toast.error(result.message)
+      return
+    }
+    setRoster(result.members)
+  }, [demoMode])
+
+  useEffect(() => {
+    if (!user || user.role !== "admin") return
+    let cancelled = false
+    void (async () => {
+      if (demoMode) return
+      const result = await loadTeamRosterAction()
+      if (cancelled) return
+      if (!result.ok) {
+        toast.error(result.message)
+        return
+      }
+      setRoster(result.members)
+    })()
+    return () => {
+      cancelled = true
+    }
+  }, [demoMode, user])
+
   if (!user) return <ScreenSkeleton />
   if (user.role !== "admin") {
     return (
@@ -32,6 +64,7 @@ export default function TeamPage() {
   }
 
   const marketers = state.profiles.filter((profile) => profile.role === "marketer")
+  const rosterById = new Map(roster.map((member) => [member.id, member]))
 
   async function onInvite(event: FormEvent) {
     event.preventDefault()
@@ -41,9 +74,15 @@ export default function TeamPage() {
       setLastName("")
       setEmail("")
       setOpen(false)
+      await reloadRoster()
     } catch (error) {
       toast.error(error instanceof Error ? error.message : "Could not invite marketer")
     }
+  }
+
+  async function onRosterChanged() {
+    await refresh()
+    await reloadRoster()
   }
 
   return (
@@ -68,21 +107,15 @@ export default function TeamPage() {
           const progress = reportingProgress(state, marketer)
           const assigned = assignmentsForUser(state, marketer.id)
           return (
-            <Link
+            <TeamMarketerCard
               key={marketer.id}
-              href={`/team/${marketer.id}`}
-              className="flex items-center gap-3 rounded-2xl border border-border bg-white p-4"
-            >
-              <UserAvatar profile={marketer} className="size-12" />
-              <div className="min-w-0 flex-1">
-                <p className="font-semibold">{displayName(marketer)}</p>
-                <p className="text-sm capitalize text-muted-foreground">{marketer.role}</p>
-                <p className="mt-1 text-sm">
-                  Today&apos;s reporting: {progress.completed} / {progress.total} completed
-                </p>
-                <p className="text-sm text-muted-foreground">Assigned clients: {assigned.length}</p>
-              </div>
-            </Link>
+              profile={marketer}
+              member={rosterById.get(marketer.id) ?? null}
+              completed={progress.completed}
+              total={progress.total}
+              assignedCount={assigned.length}
+              onChanged={onRosterChanged}
+            />
           )
         })}
       </div>

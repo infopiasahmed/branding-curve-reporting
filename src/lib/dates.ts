@@ -18,6 +18,10 @@ export function formatLongDate(date = new Date()) {
   return format(date, "EEEE, d MMMM", { locale })
 }
 
+export function formatTeamDate(iso: string) {
+  return format(parseISO(iso), "d MMM yyyy", { locale })
+}
+
 export function formatTime(time: string) {
   const [hours, minutes] = time.split(":").map(Number)
   const date = new Date()

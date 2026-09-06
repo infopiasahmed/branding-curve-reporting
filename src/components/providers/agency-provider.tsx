@@ -62,6 +62,7 @@ type AgencyContextValue = {
     lastName: string
     email: string
   }) => Promise<void>
+  refresh: () => Promise<void>
   saveMeeting: (input: {
     id?: string
     clientId: string
@@ -236,6 +237,10 @@ export function AgencyProvider({
         const result = await inviteMarketerAction(input)
         if (!result.ok) throw new Error(result.message)
         toast.success(`Invitation sent to ${result.email}`)
+        await refreshRemote()
+      },
+      refresh: async () => {
+        if (demoMode) return
         await refreshRemote()
       },
       saveMeeting: async (input) => {
