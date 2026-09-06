@@ -9,8 +9,12 @@ import { Input } from "@/components/ui/input"
 import { Label } from "@/components/ui/label"
 import { createSupabaseBrowserClient } from "@/lib/supabase/client"
 
-const INVITE_INVALID =
-  "This invitation is invalid or has expired. Ask your admin for a new invitation."
+const INVITE_EXPIRED =
+  "This invitation has expired. Ask your admin to resend it."
+const INVITE_DENIED =
+  "This invitation is no longer valid. Ask your admin to resend it."
+const INVITE_VERIFY_FAILED =
+  "We couldn't verify this invitation. Please try again or ask your admin to resend it."
 const RECOVERY_INVALID = "This reset link is invalid or has expired. Request a new one."
 
 type SetupBranch =
@@ -23,18 +27,26 @@ type SetupBranch =
 
 let setupInFlight: Promise<boolean> | null = null
 let setupFingerprint: string | null = null
+let inviteVerifyInFlight = false
 
 function clearAuthParamsFromUrl() {
   window.history.replaceState({}, document.title, window.location.pathname)
 }
 
-function mapVerifyRedirectError(error: string | null, errorCode: string | null) {
+function inviteErrorFromCode(error: string | null, errorCode: string | null) {
   const code = (errorCode ?? "").toLowerCase()
   const err = (error ?? "").toLowerCase()
-  if (code === "otp_expired" || err === "otp_expired" || err === "access_denied") {
-    return INVITE_INVALID
+  if (code === "otp_expired" || err === "otp_expired" || err.includes("otp_expired")) {
+    return INVITE_EXPIRED
   }
-  return INVITE_INVALID
+  if (code === "access_denied" || err === "access_denied" || err.includes("access_denied")) {
+    return INVITE_DENIED
+  }
+  return INVITE_VERIFY_FAILED
+}
+
+function isPrefetchSafeInvite(url: ReturnType<typeof readAuthUrl>) {
+  return Boolean(url.tokenHash) && (url.queryType ?? "").toLowerCase() === "invite"
 }
 
 function readAuthUrl() {
@@ -99,9 +111,8 @@ function tempInviteDiagnostic(fields: {
   })
 }
 
-async function establishSetupSession(): Promise<boolean> {
-  const url = readAuthUrl()
-  const baseDiag = {
+function diagnosticBase(url: ReturnType<typeof readAuthUrl>) {
+  return {
     error_code: url.errorCode,
     queryType: url.queryType,
     hashType: url.hashType,
@@ -111,10 +122,21 @@ async function establishSetupSession(): Promise<boolean> {
     tokenHashPresent: Boolean(url.tokenHash),
     codePresent: Boolean(url.code),
   }
+}
+
+async function establishSetupSession(): Promise<boolean> {
+  const url = readAuthUrl()
+  const baseDiag = diagnosticBase(url)
 
   if (url.error) {
     tempInviteDiagnostic({ ...baseDiag, branch: "url_error" })
-    throw new Error(mapVerifyRedirectError(url.error, url.errorCode))
+    throw new Error(inviteErrorFromCode(url.error, url.errorCode))
+  }
+
+  // Prefetch-safe token_hash invites are verified only from the Continue button.
+  if (isPrefetchSafeInvite(url)) {
+    tempInviteDiagnostic({ ...baseDiag, branch: "token_hash" })
+    throw new Error(INVITE_VERIFY_FAILED)
   }
 
   if (url.hashType === "invite" && url.accessToken && url.refreshToken) {
@@ -142,36 +164,13 @@ async function establishSetupSession(): Promise<boolean> {
       getSessionSuccess: Boolean(session),
       getUserSuccess: Boolean(user),
     })
-    if (sessionError || !session || !user) throw new Error(INVITE_INVALID)
+    if (sessionError || !session || !user) throw new Error(INVITE_DENIED)
     return true
   }
 
   if (url.tokenHash) {
-    if (url.queryType !== "invite") {
-      tempInviteDiagnostic({ ...baseDiag, branch: "none" })
-      throw new Error(INVITE_INVALID)
-    }
-    const supabase = createSupabaseBrowserClient()
-    if (!supabase) throw new Error("Password setup is only available when the database is connected.")
-    const { error: verifyError } = await supabase.auth.verifyOtp({
-      token_hash: url.tokenHash,
-      type: "invite",
-    })
-    const {
-      data: { session },
-    } = await supabase.auth.getSession()
-    const {
-      data: { user },
-    } = await supabase.auth.getUser()
-    tempInviteDiagnostic({
-      ...baseDiag,
-      branch: "token_hash",
-      getSessionSuccess: Boolean(session),
-      getUserSuccess: Boolean(user),
-    })
-    if (verifyError || !session || !user) throw new Error(INVITE_INVALID)
-    clearAuthParamsFromUrl()
-    return true
+    tempInviteDiagnostic({ ...baseDiag, branch: "none" })
+    throw new Error(INVITE_VERIFY_FAILED)
   }
 
   if (url.code) {
@@ -235,28 +234,101 @@ function beginSetup() {
 export function ResetPasswordForm() {
   const router = useRouter()
   const [ready, setReady] = useState(false)
+  const [pendingInvite, setPendingInvite] = useState(false)
   const [isInvite, setIsInvite] = useState(false)
   const [linkError, setLinkError] = useState<string | null>(null)
   const [password, setPassword] = useState("")
   const [confirm, setConfirm] = useState("")
   const [submitting, setSubmitting] = useState(false)
+  const [verifying, setVerifying] = useState(false)
 
   useEffect(() => {
     let cancelled = false
-    void beginSetup()
-      .then((inviteFlow) => {
+
+    async function setupFromUrl() {
+      const url = readAuthUrl()
+
+      if (url.error) {
+        if (!cancelled) setLinkError(inviteErrorFromCode(url.error, url.errorCode))
+        return
+      }
+
+      // token_hash invites stay unverified until the user presses Continue.
+      if (isPrefetchSafeInvite(url)) {
+        tempInviteDiagnostic({ ...diagnosticBase(url), branch: "token_hash" })
+        if (!cancelled) setPendingInvite(true)
+        return
+      }
+
+      try {
+        const inviteFlow = await beginSetup()
         if (cancelled) return
         setIsInvite(inviteFlow)
         setReady(true)
-      })
-      .catch((error) => {
+      } catch (error) {
         if (cancelled) return
         setLinkError(error instanceof Error ? error.message : "Could not open this link")
-      })
+      }
+    }
+
+    void setupFromUrl()
     return () => {
       cancelled = true
     }
   }, [])
+
+  async function onContinueInvite() {
+    if (verifying || inviteVerifyInFlight) return
+    inviteVerifyInFlight = true
+    setVerifying(true)
+    try {
+      const url = readAuthUrl()
+      if (!isPrefetchSafeInvite(url) || !url.tokenHash) {
+        setLinkError(INVITE_VERIFY_FAILED)
+        return
+      }
+
+      const supabase = createSupabaseBrowserClient()
+      if (!supabase) {
+        setLinkError("Password setup is only available when the database is connected.")
+        return
+      }
+
+      const { error: verifyError } = await supabase.auth.verifyOtp({
+        token_hash: url.tokenHash,
+        type: "invite",
+      })
+      const {
+        data: { session },
+      } = await supabase.auth.getSession()
+      const {
+        data: { user },
+      } = await supabase.auth.getUser()
+      tempInviteDiagnostic({
+        ...diagnosticBase(url),
+        branch: "token_hash",
+        getSessionSuccess: Boolean(session),
+        getUserSuccess: Boolean(user),
+      })
+
+      if (verifyError) {
+        setLinkError(inviteErrorFromCode(verifyError.message, verifyError.code ?? null))
+        return
+      }
+      if (!session || !user) {
+        setLinkError(INVITE_VERIFY_FAILED)
+        return
+      }
+
+      clearAuthParamsFromUrl()
+      setIsInvite(true)
+      setPendingInvite(false)
+      setReady(true)
+    } finally {
+      inviteVerifyInFlight = false
+      setVerifying(false)
+    }
+  }
 
   async function onSubmit(event: FormEvent) {
     event.preventDefault()
@@ -280,7 +352,7 @@ export function ResetPasswordForm() {
       data: { user },
     } = await supabase.auth.getUser()
     if (!session || !user) {
-      toast.error(isInvite ? INVITE_INVALID : RECOVERY_INVALID)
+      toast.error(isInvite ? INVITE_VERIFY_FAILED : RECOVERY_INVALID)
       return
     }
     setSubmitting(true)
@@ -304,6 +376,35 @@ export function ResetPasswordForm() {
         <p className="rounded-xl border border-border bg-white px-4 py-5 text-sm leading-6 text-muted-foreground">
           {linkError}
         </p>
+        <p className="text-center text-sm">
+          <Link
+            href="/login"
+            className="text-muted-foreground underline-offset-4 hover:text-primary hover:underline"
+          >
+            Back to login
+          </Link>
+        </p>
+      </div>
+    )
+  }
+
+  if (pendingInvite && !ready) {
+    return (
+      <div className="space-y-5">
+        <p className="text-center text-sm leading-6 text-muted-foreground">
+          Continue to verify your invitation and create your password.
+        </p>
+        <Button
+          type="button"
+          size="xl"
+          className="w-full"
+          disabled={verifying}
+          onClick={() => {
+            void onContinueInvite()
+          }}
+        >
+          {verifying ? "Verifying..." : "Continue to set password"}
+        </Button>
         <p className="text-center text-sm">
           <Link
             href="/login"
